@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+repo="router-for-me/CLIProxyAPI"
+formula="cliproxyapi"
+version="${1:-latest}"
+
+usage() {
+  cat <<'USAGE'
+Usage:
+  cliproxyapi-brew-updater [version|latest]
+
+Examples:
+  cliproxyapi-brew-updater
+  cliproxyapi-brew-updater latest
+  cliproxyapi-brew-updater 6.9.36
+  cliproxyapi-brew-updater v6.9.36
+
+This keeps Homebrew services working by replacing the brew-installed
+cliproxyapi executable with a wrapper that runs the downloaded upstream
+binary and passes the Homebrew config path:
+  $HOMEBREW_PREFIX/etc/cliproxyapi.conf
+USAGE
+}
+
+if [[ "${version}" == "-h" || "${version}" == "--help" ]]; then
+  usage
+  exit 0
+fi
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+require_cmd brew
+require_cmd curl
+require_cmd tar
+require_cmd shasum
+
+brew_prefix="$(brew --prefix)"
+formula_prefix="$(brew --prefix "${formula}")"
+cellar_root="$(brew --cellar "${formula}")"
+bin_dir="$(cd "${formula_prefix}/bin" && pwd -P)"
+wrapper="${bin_dir}/${formula}"
+config_path="${brew_prefix}/etc/cliproxyapi.conf"
+
+case "$(uname -m)" in
+  arm64)
+    platform="darwin_arm64"
+    ;;
+  x86_64)
+    platform="darwin_amd64"
+    ;;
+  *)
+    echo "Unsupported macOS architecture: $(uname -m)" >&2
+    exit 1
+    ;;
+esac
+
+if [[ "${version}" == "latest" ]]; then
+  latest_json="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest")"
+  tag="$(printf '%s\n' "${latest_json}" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
+  if [[ -z "${tag}" ]]; then
+    echo "Failed to resolve latest release tag" >&2
+    exit 1
+  fi
+else
+  tag="${version}"
+fi
+
+tag="v${tag#v}"
+plain_version="${tag#v}"
+asset="CLIProxyAPI_${plain_version}_${platform}.tar.gz"
+download_base="https://github.com/${repo}/releases/download/${tag}"
+real_binary="${bin_dir}/cliproxyapi-${plain_version}"
+
+tmp_dir="$(mktemp -d)"
+cleanup() {
+  rm -rf "${tmp_dir}"
+}
+trap cleanup EXIT
+
+echo "Updating ${formula} to ${tag} for ${platform}"
+echo "Homebrew formula path: ${formula_prefix}"
+echo "Config path: ${config_path}"
+
+curl -fL -o "${tmp_dir}/checksums.txt" "${download_base}/checksums.txt"
+checksum_line="$(grep "  ${asset}$" "${tmp_dir}/checksums.txt" || true)"
+if [[ -z "${checksum_line}" ]]; then
+  echo "Checksum entry not found for ${asset}" >&2
+  exit 1
+fi
+checksum="${checksum_line%% *}"
+
+curl -fL -o "${tmp_dir}/${asset}" "${download_base}/${asset}"
+printf '%s  %s\n' "${checksum}" "${tmp_dir}/${asset}" | shasum -a 256 -c
+
+tar -xzf "${tmp_dir}/${asset}" -C "${tmp_dir}" cli-proxy-api
+install -m 0755 "${tmp_dir}/cli-proxy-api" "${real_binary}"
+
+chmod u+w "${wrapper}" 2>/dev/null || true
+cat >"${wrapper}" <<EOF
+#!/bin/sh
+exec "${real_binary}" -config "${config_path}" "\$@"
+EOF
+chmod 0755 "${wrapper}"
+
+find "${bin_dir}" -maxdepth 1 -type f -name 'cliproxyapi-*' ! -name "cliproxyapi-${plain_version}" -delete
+find "${cellar_root}" -path '*/bin/cliproxyapi-*' -type f ! -path "${real_binary}" -delete
+
+if brew services info "${formula}" 2>/dev/null | grep -q 'Running: true'; then
+  echo "Restarting brew service: ${formula}"
+  brew services restart "${formula}"
+else
+  echo "Service is not currently running. Start it with:"
+  echo "  brew services start ${formula}"
+fi
+
+set +o pipefail
+version_line="$("${wrapper}" --version 2>&1 | sed -n '1p')"
+set -o pipefail
+printf '%s\n' "${version_line}"

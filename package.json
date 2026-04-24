@@ -1,0 +1,31 @@
+{
+  "name": "cliproxyapi-brew-updater",
+  "version": "0.1.0",
+  "description": "Update a Homebrew-managed CLIProxyAPI service to upstream release binaries.",
+  "bin": {
+    "cliproxyapi-brew-updater": "bin/cliproxyapi-brew-updater"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "check": "bash -n bin/cliproxyapi-brew-updater"
+  },
+  "keywords": [
+    "cliproxyapi",
+    "cli-proxy-api",
+    "homebrew",
+    "updater"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Veath/cliproxyapi-brew-updater.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Veath/cliproxyapi-brew-updater/issues"
+  },
+  "homepage": "https://github.com/Veath/cliproxyapi-brew-updater#readme",
+  "license": "MIT"
+}
