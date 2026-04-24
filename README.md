@@ -3,7 +3,24 @@
 Update a Homebrew-managed `cliproxyapi` service to an upstream CLIProxyAPI
 release binary while preserving the Homebrew service entry and config path.
 
-This is useful when `homebrew/core` lags behind upstream CLIProxyAPI releases.
+## Why this exists
+
+CLIProxyAPI publishes releases frequently, but the `homebrew/core` formula may
+not follow every upstream patch release immediately. In particular, Homebrew's
+formula can use `livecheck` throttling for high-frequency projects, so a release
+such as `6.9.36` may be available on GitHub while `brew upgrade cliproxyapi`
+still installs an older version.
+
+Installing the upstream binary manually solves the version lag, but it creates a
+second problem: many users already run CLIProxyAPI with `brew services` and keep
+their config at Homebrew's config path, such as
+`/opt/homebrew/etc/cliproxyapi.conf`. Replacing the command naively can lose that
+service workflow or start CLIProxyAPI without the expected config file.
+
+This package keeps the Homebrew workflow intact while using the upstream release
+binary. It updates the binary used by the Homebrew service, writes a small
+wrapper that passes the existing Homebrew config file, restarts the service when
+needed, and removes older manually installed release binaries.
 
 ## Usage
 

@@ -1,6 +1,6 @@
 {
   "name": "cliproxyapi-brew-updater",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Update a Homebrew-managed CLIProxyAPI service to upstream release binaries.",
   "bin": {
     "cliproxyapi-brew-updater": "bin/cliproxyapi-brew-updater"
