@@ -61,9 +61,11 @@ case "$(uname -m)" in
 esac
 
 if [[ "${version}" == "latest" ]]; then
-  latest_json="$(curl -fsSL "https://api.github.com/repos/${repo}/releases/latest")"
-  tag="$(printf '%s\n' "${latest_json}" | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n 1)"
-  if [[ -z "${tag}" ]]; then
+  latest_url="$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${repo}/releases/latest")"
+  latest_url="${latest_url%%[?#]*}"
+  latest_url="${latest_url%/}"
+  tag="${latest_url##*/}"
+  if [[ -z "${tag}" || "${tag}" == "latest" ]]; then
     echo "Failed to resolve latest release tag" >&2
     exit 1
   fi
