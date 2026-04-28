@@ -25,6 +25,7 @@ printf '#!/bin/sh\nprintf "cli-proxy-api %s\\n" "$1"\n' "${version}" >"${tmp_dir
 chmod 0755 "${tmp_dir}/payload/cli-proxy-api"
 tar -czf "${asset_path}" -C "${tmp_dir}/payload" cli-proxy-api
 checksum="$(shasum -a 256 "${asset_path}" | awk '{print $1}')"
+latest_attempts_file="${tmp_dir}/latest-attempts"
 
 cat >"${fake_bin}/brew" <<BREW
 #!/usr/bin/env bash
@@ -88,6 +89,16 @@ done
 
 case "\${url}" in
   https://github.com/router-for-me/CLIProxyAPI/releases/latest)
+    latest_attempts=0
+    if [[ -f "${latest_attempts_file}" ]]; then
+      latest_attempts="\$(cat "${latest_attempts_file}")"
+    fi
+    latest_attempts=\$((latest_attempts + 1))
+    printf '%s\\n' "\${latest_attempts}" >"${latest_attempts_file}"
+    if [[ "\${latest_attempts}" -eq 1 ]]; then
+      echo "curl: (35) LibreSSL SSL_connect: SSL_ERROR_SYSCALL in connection to github.com:443" >&2
+      exit 35
+    fi
     if [[ "\${write_effective}" == true ]]; then
       printf '%s\\n' "https://github.com/router-for-me/CLIProxyAPI/releases/tag/v${version}"
     fi
