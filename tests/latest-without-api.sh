@@ -130,6 +130,7 @@ grep -q "Downloading release asset: ${asset}" "${tmp_dir}/output.txt"
 grep -q "Checksum verified" "${tmp_dir}/output.txt"
 grep -q "Installed version:" "${tmp_dir}/output.txt"
 grep -q "cli-proxy-api ${version}" "${tmp_dir}/output.txt"
+grep -q -- "--progress-bar" "${tmp_dir}/curl.log"
 
 if grep -q '% Total' "${tmp_dir}/output.txt"; then
   echo "curl progress meter should not be shown in updater output" >&2

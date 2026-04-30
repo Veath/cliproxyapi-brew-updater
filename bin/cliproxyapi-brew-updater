@@ -67,6 +67,13 @@ curl_with_retry() {
   done
 }
 
+download_with_progress() {
+  local output="$1"
+  local url="$2"
+
+  curl_with_retry -fL --progress-bar -o "${output}" "${url}"
+}
+
 brew_prefix="$(brew --prefix)"
 formula_prefix="$(brew --prefix "${formula}")"
 cellar_root="$(brew --cellar "${formula}")"
@@ -127,7 +134,7 @@ fi
 checksum="${checksum_line%% *}"
 
 log "Downloading release asset: ${asset}"
-curl_with_retry -fsSL -o "${tmp_dir}/${asset}" "${download_base}/${asset}"
+download_with_progress "${tmp_dir}/${asset}" "${download_base}/${asset}"
 
 log "Verifying checksum..."
 printf '%s  %s\n' "${checksum}" "${tmp_dir}/${asset}" | shasum -a 256 -c >/dev/null

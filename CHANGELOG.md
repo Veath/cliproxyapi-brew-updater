@@ -6,6 +6,11 @@ All notable changes to `cliproxyapi-brew-updater` are documented in this file.
 
 - No changes yet.
 
+## 0.1.5 - 2026-04-30
+
+- Added a compact single-line progress bar for the main CLIProxyAPI release
+  asset download.
+
 ## 0.1.4 - 2026-04-30
 
 - Improved repository discoverability with clearer README wording, package
