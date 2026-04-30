@@ -4,10 +4,16 @@ All notable changes to `cliproxyapi-brew-updater` are documented in this file.
 
 ## Unreleased
 
+- No changes yet.
+
+## 0.1.4 - 2026-04-30
+
 - Improved repository discoverability with clearer README wording, package
   metadata, and GitHub topics.
 - Added this changelog.
 - Documented the MIT license in the README.
+- Made updater logs quieter and more readable by hiding curl progress meters and
+  printing concise installation steps.
 
 ## 0.1.3 - 2026-04-28
 

@@ -117,12 +117,26 @@ esac
 CURL
 chmod 0755 "${fake_bin}/curl"
 
-PATH="${fake_bin}:${PATH}" "${repo_root}/bin/cliproxyapi-brew-updater" latest >"${tmp_dir}/output.txt"
+PATH="${fake_bin}:${PATH}" "${repo_root}/bin/cliproxyapi-brew-updater" latest >"${tmp_dir}/output.txt" 2>&1
 
 if grep -q 'api.github.com' "${tmp_dir}/curl.log"; then
   echo "GitHub API was called despite successful run" >&2
   exit 1
 fi
 
+grep -q "Resolving latest CLIProxyAPI release" "${tmp_dir}/output.txt"
 grep -q "Updating cliproxyapi to v${version}" "${tmp_dir}/output.txt"
+grep -q "Downloading release asset: ${asset}" "${tmp_dir}/output.txt"
+grep -q "Checksum verified" "${tmp_dir}/output.txt"
+grep -q "Installed version:" "${tmp_dir}/output.txt"
 grep -q "cli-proxy-api ${version}" "${tmp_dir}/output.txt"
+
+if grep -q '% Total' "${tmp_dir}/output.txt"; then
+  echo "curl progress meter should not be shown in updater output" >&2
+  exit 1
+fi
+
+if grep -Eq '(/tmp|/var/folders/).+ OK' "${tmp_dir}/output.txt"; then
+  echo "raw checksum temp-file output should not be shown" >&2
+  exit 1
+fi
