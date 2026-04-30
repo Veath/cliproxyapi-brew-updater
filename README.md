@@ -98,3 +98,7 @@ Yes. Pass a version such as `6.9.36` or `v6.9.36`:
 ```bash
 npx cliproxyapi-brew-updater 6.9.36
 ```
+
+## License
+
+MIT. See [LICENSE](LICENSE).
