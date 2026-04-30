@@ -1,7 +1,7 @@
 {
   "name": "cliproxyapi-brew-updater",
   "version": "0.1.3",
-  "description": "Update a Homebrew-managed CLIProxyAPI service to upstream release binaries.",
+  "description": "CLIProxyAPI Homebrew updater for macOS that installs upstream GitHub release binaries while preserving brew services.",
   "bin": {
     "cliproxyapi-brew-updater": "bin/cliproxyapi-brew-updater"
   },
@@ -17,7 +17,14 @@
   "keywords": [
     "cliproxyapi",
     "cli-proxy-api",
+    "cli-proxyapi",
+    "cliproxyapi-updater",
+    "homebrew-cliproxyapi",
     "homebrew",
+    "brew-services",
+    "macos",
+    "github-release",
+    "npx",
     "updater"
   ],
   "repository": {
