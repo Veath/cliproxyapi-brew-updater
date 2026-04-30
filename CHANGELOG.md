@@ -6,6 +6,12 @@ All notable changes to `cliproxyapi-brew-updater` are documented in this file.
 
 - No changes yet.
 
+## 0.1.6 - 2026-04-30
+
+- Skip downloads, wrapper rewrites, and service restarts when the requested
+  upstream CLIProxyAPI version is already installed and the Homebrew wrapper
+  already points to it.
+
 ## 0.1.5 - 2026-04-30
 
 - Added a compact single-line progress bar for the main CLIProxyAPI release

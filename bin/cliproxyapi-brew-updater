@@ -74,6 +74,13 @@ download_with_progress() {
   curl_with_retry -fL --progress-bar -o "${output}" "${url}"
 }
 
+wrapper_points_to_release() {
+  local target_binary="$1"
+
+  [[ -f "${wrapper}" ]] || return 1
+  grep -Fq "exec \"${target_binary}\" -config \"${config_path}\"" "${wrapper}"
+}
+
 brew_prefix="$(brew --prefix)"
 formula_prefix="$(brew --prefix "${formula}")"
 cellar_root="$(brew --cellar "${formula}")"
@@ -113,6 +120,11 @@ plain_version="${tag#v}"
 asset="CLIProxyAPI_${plain_version}_${platform}.tar.gz"
 download_base="https://github.com/${repo}/releases/download/${tag}"
 real_binary="${bin_dir}/cliproxyapi-${plain_version}"
+
+if [[ -x "${real_binary}" ]] && wrapper_points_to_release "${real_binary}"; then
+  log "Already up to date: ${formula} ${tag}"
+  exit 0
+fi
 
 tmp_dir="$(mktemp -d)"
 cleanup() {
