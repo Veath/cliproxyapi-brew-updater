@@ -1,6 +1,6 @@
 {
   "name": "cliproxyapi-brew-updater",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "CLIProxyAPI Homebrew updater for macOS that installs upstream GitHub release binaries while preserving brew services.",
   "bin": {
     "cliproxyapi-brew-updater": "bin/cliproxyapi-brew-updater"
@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "check": "bash -n bin/cliproxyapi-brew-updater",
-    "test": "bash tests/latest-without-api.sh && bash tests/up-to-date-skip.sh"
+    "test": "bash tests/latest-without-api.sh && bash tests/up-to-date-skip.sh && bash tests/aarch64-asset-name.sh"
   },
   "keywords": [
     "cliproxyapi",

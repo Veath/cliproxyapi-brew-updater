@@ -90,10 +90,10 @@ config_path="${brew_prefix}/etc/cliproxyapi.conf"
 
 case "$(uname -m)" in
   arm64)
-    platform="darwin_arm64"
+    platform_candidates=("darwin_aarch64" "darwin_arm64")
     ;;
   x86_64)
-    platform="darwin_amd64"
+    platform_candidates=("darwin_amd64")
     ;;
   *)
     echo "Unsupported macOS architecture: $(uname -m)" >&2
@@ -117,7 +117,6 @@ fi
 
 tag="v${tag#v}"
 plain_version="${tag#v}"
-asset="CLIProxyAPI_${plain_version}_${platform}.tar.gz"
 download_base="https://github.com/${repo}/releases/download/${tag}"
 real_binary="${bin_dir}/cliproxyapi-${plain_version}"
 
@@ -132,15 +131,24 @@ cleanup() {
 }
 trap cleanup EXIT
 
-log "Updating ${formula} to ${tag} for ${platform}"
+log "Updating ${formula} to ${tag}"
 log "Homebrew formula: ${formula_prefix}"
 log "Config file: ${config_path}"
 
 log "Downloading checksums..."
 curl_with_retry -fsSL -o "${tmp_dir}/checksums.txt" "${download_base}/checksums.txt"
-checksum_line="$(grep "  ${asset}$" "${tmp_dir}/checksums.txt" || true)"
+checksum_line=""
+asset=""
+for platform in "${platform_candidates[@]}"; do
+  candidate_asset="CLIProxyAPI_${plain_version}_${platform}.tar.gz"
+  checksum_line="$(grep "  ${candidate_asset}$" "${tmp_dir}/checksums.txt" || true)"
+  if [[ -n "${checksum_line}" ]]; then
+    asset="${candidate_asset}"
+    break
+  fi
+done
 if [[ -z "${checksum_line}" ]]; then
-  echo "Checksum entry not found for ${asset}" >&2
+  echo "Checksum entry not found for CLIProxyAPI_${plain_version}_<${platform_candidates[*]}>.tar.gz" >&2
   exit 1
 fi
 checksum="${checksum_line%% *}"

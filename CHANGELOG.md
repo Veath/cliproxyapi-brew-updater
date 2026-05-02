@@ -6,6 +6,12 @@ All notable changes to `cliproxyapi-brew-updater` are documented in this file.
 
 - No changes yet.
 
+## 0.1.7 - 2026-05-02
+
+- Added support for upstream Apple Silicon release assets named
+  `darwin_aarch64` while keeping compatibility with older `darwin_arm64`
+  assets.
+
 ## 0.1.6 - 2026-04-30
 
 - Skip downloads, wrapper rewrites, and service restarts when the requested
