@@ -3,18 +3,41 @@ set -euo pipefail
 
 repo="router-for-me/CLIProxyAPI"
 formula="cliproxyapi"
-version="${1:-latest}"
+command="update"
+version="latest"
+json=false
+dry_run=false
+tmp_dir=""
+real_binary=""
+wrapper=""
+
+cleanup() {
+  if [[ -n "${tmp_dir:-}" ]]; then
+    rm -rf "${tmp_dir}"
+  fi
+  if [[ -n "${real_binary:-}" ]]; then
+    rm -f "${real_binary}.tmp"
+  fi
+  if [[ -n "${wrapper:-}" ]]; then
+    rm -f "${wrapper}.tmp"
+  fi
+}
+trap cleanup EXIT
 
 usage() {
   cat <<'USAGE'
 Usage:
-  cliproxyapi-brew-updater [version|latest]
+  cliproxyapi-brew-updater [--dry-run] [--json] [version|latest]
+  cliproxyapi-brew-updater status|doctor [--json]
+  cliproxyapi-brew-updater repair [--dry-run] [--json] [version|latest]
 
 Examples:
   cliproxyapi-brew-updater
   cliproxyapi-brew-updater latest
   cliproxyapi-brew-updater 6.9.36
-  cliproxyapi-brew-updater v6.9.36
+  cliproxyapi-brew-updater status --json
+  cliproxyapi-brew-updater repair
+  cliproxyapi-brew-updater --dry-run latest
 
 This keeps Homebrew services working by replacing the brew-installed
 cliproxyapi executable with a wrapper that runs the downloaded upstream
@@ -23,10 +46,39 @@ binary and passes the Homebrew config path:
 USAGE
 }
 
-if [[ "${version}" == "-h" || "${version}" == "--help" ]]; then
-  usage
-  exit 0
-fi
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --json)
+      json=true
+      shift
+      ;;
+    --dry-run)
+      dry_run=true
+      shift
+      ;;
+    status|doctor)
+      command="status"
+      shift
+      ;;
+    repair)
+      command="repair"
+      shift
+      ;;
+    latest|v[0-9]*|[0-9]*)
+      version="$1"
+      shift
+      ;;
+    *)
+      echo "Unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+done
 
 require_cmd() {
   if ! command -v "$1" >/dev/null 2>&1; then
@@ -41,7 +93,21 @@ require_cmd tar
 require_cmd shasum
 
 log() {
-  printf '%s\n' "$*"
+  if [[ "${json}" == false ]]; then
+    printf '%s\n' "$*"
+  fi
+}
+
+json_escape() {
+  local value="$1"
+  value="${value//\\/\\\\}"
+  value="${value//\"/\\\"}"
+  value="${value//$'\n'/\\n}"
+  printf '%s' "${value}"
+}
+
+json_string() {
+  printf '"%s"' "$(json_escape "$1")"
 }
 
 curl_with_retry() {
@@ -74,11 +140,262 @@ download_with_progress() {
   curl_with_retry -fL --progress-bar -o "${output}" "${url}"
 }
 
+normalize_tag() {
+  local raw_tag="$1"
+  printf 'v%s\n' "${raw_tag#v}"
+}
+
+resolve_latest_tag() {
+  local latest_url
+
+  latest_url="$(curl_with_retry -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${repo}/releases/latest")"
+  latest_url="${latest_url%%[?#]*}"
+  latest_url="${latest_url%/}"
+  local latest_tag="${latest_url##*/}"
+  if [[ -z "${latest_tag}" || "${latest_tag}" == "latest" ]]; then
+    echo "Failed to resolve latest release tag" >&2
+    exit 1
+  fi
+  normalize_tag "${latest_tag}"
+}
+
+wrapper_target() {
+  if [[ ! -f "${wrapper}" ]]; then
+    return 0
+  fi
+  sed -n 's/^exec "\([^"]*\)" -config ".*$/\1/p' "${wrapper}" | sed -n '1p'
+}
+
+version_from_binary_path() {
+  local path="$1"
+  local name="${path##*/}"
+  if [[ "${name}" == cliproxyapi-* ]]; then
+    normalize_tag "${name#cliproxyapi-}"
+  fi
+}
+
 wrapper_points_to_release() {
   local target_binary="$1"
 
   [[ -f "${wrapper}" ]] || return 1
   grep -Fq "exec \"${target_binary}\" -config \"${config_path}\"" "${wrapper}"
+}
+
+wrapper_status() {
+  local target_binary
+
+  if [[ ! -f "${wrapper}" ]]; then
+    printf 'missing\n'
+    return
+  fi
+  target_binary="$(wrapper_target)"
+  if [[ -z "${target_binary}" ]]; then
+    printf 'mismatch\n'
+    return
+  fi
+  if [[ ! -x "${target_binary}" ]]; then
+    printf 'target-missing\n'
+    return
+  fi
+  if wrapper_points_to_release "${target_binary}"; then
+    printf 'ok\n'
+    return
+  fi
+  printf 'mismatch\n'
+}
+
+service_status() {
+  local info
+
+  if ! info="$(brew services info "${formula}" 2>/dev/null)"; then
+    printf 'unknown\n'
+    return
+  fi
+  if printf '%s\n' "${info}" | grep -q 'Running: true'; then
+    printf 'running\n'
+    return
+  fi
+  printf 'stopped\n'
+}
+
+count_old_release_binaries() {
+  local keep_binary="$1"
+  local count=0
+  local path
+
+  while IFS= read -r path; do
+    if [[ -n "${keep_binary}" && "${path}" == "${keep_binary}" ]]; then
+      continue
+    fi
+    count=$((count + 1))
+  done < <(
+    {
+      find "${bin_dir}" -maxdepth 1 -type f -name 'cliproxyapi-*' 2>/dev/null
+      find "${cellar_root}" -path '*/bin/cliproxyapi-*' -type f 2>/dev/null
+    } | sort -u
+  )
+  printf '%s\n' "${count}"
+}
+
+existing_binary_matches_version() {
+  local candidate_binary="$1"
+  local expected_version="$2"
+  local version_output first_line expected_regex
+
+  [[ -x "${candidate_binary}" ]] || return 1
+  if ! version_output="$("${candidate_binary}" --version 2>&1)"; then
+    return 1
+  fi
+  first_line="${version_output%%$'\n'*}"
+  expected_regex="${expected_version//./\\.}"
+  [[ "${first_line}" =~ (^|[^0-9.])${expected_regex}([^0-9.]|$) ]]
+}
+
+find_release_asset() {
+  local plain_version="$1"
+  local checksums_file="$2"
+  local platform candidate_asset checksum_line
+
+  for platform in "${platform_candidates[@]}"; do
+    candidate_asset="CLIProxyAPI_${plain_version}_${platform}.tar.gz"
+    checksum_line="$(grep "  ${candidate_asset}$" "${checksums_file}" || true)"
+    if [[ -n "${checksum_line}" ]]; then
+      asset="${candidate_asset}"
+      checksum="${checksum_line%% *}"
+      return 0
+    fi
+  done
+  echo "Checksum entry not found for CLIProxyAPI_${plain_version}_<${platform_candidates[*]}>.tar.gz" >&2
+  exit 1
+}
+
+print_status_json() {
+  local overall_status="$1"
+  local current_tag="$2"
+  local latest_tag="$3"
+  local target_binary="$4"
+  local current_wrapper_status="$5"
+  local current_service_status="$6"
+  local old_count="$7"
+
+  printf '{'
+  printf '"command":"status",'
+  printf '"status":%s,' "$(json_string "${overall_status}")"
+  printf '"formulaPrefix":%s,' "$(json_string "${formula_prefix}")"
+  printf '"binDir":%s,' "$(json_string "${bin_dir}")"
+  printf '"wrapper":%s,' "$(json_string "${wrapper}")"
+  printf '"configPath":%s,' "$(json_string "${config_path}")"
+  printf '"currentVersion":%s,' "$(json_string "${current_tag}")"
+  printf '"latestVersion":%s,' "$(json_string "${latest_tag}")"
+  printf '"wrapperTarget":%s,' "$(json_string "${target_binary}")"
+  printf '"wrapperStatus":%s,' "$(json_string "${current_wrapper_status}")"
+  printf '"serviceStatus":%s,' "$(json_string "${current_service_status}")"
+  printf '"oldReleaseBinaryCount":%s' "${old_count}"
+  printf '}\n'
+}
+
+print_status_human() {
+  local overall_status="$1"
+  local current_tag="$2"
+  local latest_tag="$3"
+  local target_binary="$4"
+  local current_wrapper_status="$5"
+  local current_service_status="$6"
+  local old_count="$7"
+
+  printf 'CLIProxyAPI Homebrew status\n'
+  printf 'Status: %s\n' "${overall_status}"
+  printf 'Homebrew formula: %s\n' "${formula_prefix}"
+  printf 'Config file: %s\n' "${config_path}"
+  printf 'Wrapper: %s\n' "${wrapper}"
+  printf 'Wrapper status: %s\n' "${current_wrapper_status}"
+  printf 'Wrapper target: %s\n' "${target_binary:-none}"
+  printf 'Current upstream version: %s\n' "${current_tag:-unknown}"
+  printf 'Latest upstream version: %s\n' "${latest_tag}"
+  printf 'Service: %s\n' "${current_service_status}"
+  printf 'Old release binaries: %s\n' "${old_count}"
+}
+
+run_status() {
+  local latest_tag target_binary current_tag current_wrapper_status current_service_status old_count overall_status
+
+  latest_tag="$(resolve_latest_tag)"
+  target_binary="$(wrapper_target)"
+  current_tag="$(version_from_binary_path "${target_binary}")"
+  current_wrapper_status="$(wrapper_status)"
+  current_service_status="$(service_status)"
+  old_count="$(count_old_release_binaries "${target_binary}")"
+
+  if [[ "${current_wrapper_status}" != "ok" ]]; then
+    overall_status="repair-needed"
+  elif [[ -n "${latest_tag}" && "${current_tag}" != "${latest_tag}" ]]; then
+    overall_status="update-available"
+  else
+    overall_status="ok"
+  fi
+
+  if [[ "${json}" == true ]]; then
+    print_status_json "${overall_status}" "${current_tag}" "${latest_tag}" "${target_binary}" "${current_wrapper_status}" "${current_service_status}" "${old_count}"
+  else
+    print_status_human "${overall_status}" "${current_tag}" "${latest_tag}" "${target_binary}" "${current_wrapper_status}" "${current_service_status}" "${old_count}"
+  fi
+}
+
+print_result_json() {
+  local result_status="$1"
+  local action="$2"
+  local target_tag="$3"
+  local changed="$4"
+  local service_restarted="$5"
+  local message="$6"
+
+  printf '{'
+  printf '"command":%s,' "$(json_string "${action}")"
+  printf '"status":%s,' "$(json_string "${result_status}")"
+  printf '"targetVersion":%s,' "$(json_string "${target_tag}")"
+  printf '"changed":%s,' "${changed}"
+  printf '"dryRun":%s,' "${dry_run}"
+  printf '"serviceRestarted":%s,' "${service_restarted}"
+  printf '"message":%s' "$(json_string "${message}")"
+  printf '}\n'
+}
+
+write_wrapper_atomically() {
+  local wrapper_tmp="${wrapper}.tmp"
+
+  log "Writing Homebrew service wrapper: ${wrapper}"
+  cat >"${wrapper_tmp}" <<EOF
+#!/bin/sh
+exec "${real_binary}" -config "${config_path}" "\$@"
+EOF
+  chmod 0755 "${wrapper_tmp}"
+  mv -f "${wrapper_tmp}" "${wrapper}"
+}
+
+install_binary_atomically() {
+  local source_binary="$1"
+  local binary_tmp="${real_binary}.tmp"
+
+  install -m 0755 "${source_binary}" "${binary_tmp}"
+  mv -f "${binary_tmp}" "${real_binary}"
+}
+
+remove_old_release_binaries() {
+  log "Removing old release binaries..."
+  find "${bin_dir}" -maxdepth 1 -type f -name 'cliproxyapi-*' ! -name "cliproxyapi-${plain_version}" -delete
+  find "${cellar_root}" -path '*/bin/cliproxyapi-*' -type f ! -path "${real_binary}" -delete
+}
+
+restart_service_if_running() {
+  if brew services info "${formula}" 2>/dev/null | grep -q 'Running: true'; then
+    log "Restarting Homebrew service: ${formula}"
+    brew services restart "${formula}" >/dev/null
+    service_restarted=true
+  else
+    log "Service is not currently running. Start it with:"
+    log "  brew services start ${formula}"
+    service_restarted=false
+  fi
 }
 
 brew_prefix="$(brew --prefix)"
@@ -101,91 +418,102 @@ case "$(uname -m)" in
     ;;
 esac
 
-if [[ "${version}" == "latest" ]]; then
-  log "Resolving latest CLIProxyAPI release..."
-  latest_url="$(curl_with_retry -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/${repo}/releases/latest")"
-  latest_url="${latest_url%%[?#]*}"
-  latest_url="${latest_url%/}"
-  tag="${latest_url##*/}"
-  if [[ -z "${tag}" || "${tag}" == "latest" ]]; then
-    echo "Failed to resolve latest release tag" >&2
-    exit 1
-  fi
-else
-  tag="${version}"
+if [[ "${command}" == "status" ]]; then
+  run_status
+  exit 0
 fi
 
-tag="v${tag#v}"
+if [[ "${version}" == "latest" ]]; then
+  log "Resolving latest CLIProxyAPI release..."
+  tag="$(resolve_latest_tag)"
+else
+  tag="$(normalize_tag "${version}")"
+fi
+
 plain_version="${tag#v}"
 download_base="https://github.com/${repo}/releases/download/${tag}"
 real_binary="${bin_dir}/cliproxyapi-${plain_version}"
+asset=""
+checksum=""
+service_restarted=false
+changed=false
 
-if [[ -x "${real_binary}" ]] && wrapper_points_to_release "${real_binary}"; then
-  log "Already up to date: ${formula} ${tag}"
+if [[ "${command}" == "update" ]] && wrapper_points_to_release "${real_binary}" && existing_binary_matches_version "${real_binary}" "${plain_version}"; then
+  if [[ "${json}" == true ]]; then
+    print_result_json "ok" "update" "${tag}" "false" "false" "Already up to date: ${formula} ${tag}"
+  else
+    log "Already up to date: ${formula} ${tag}"
+  fi
   exit 0
 fi
 
 tmp_dir="$(mktemp -d)"
-cleanup() {
-  rm -rf "${tmp_dir}"
-}
-trap cleanup EXIT
 
-log "Updating ${formula} to ${tag}"
+if [[ "${command}" == "repair" ]]; then
+  log "Repairing ${formula} ${tag}"
+else
+  log "Updating ${formula} to ${tag}"
+fi
 log "Homebrew formula: ${formula_prefix}"
 log "Config file: ${config_path}"
 
-log "Downloading checksums..."
-curl_with_retry -fsSL -o "${tmp_dir}/checksums.txt" "${download_base}/checksums.txt"
-checksum_line=""
-asset=""
-for platform in "${platform_candidates[@]}"; do
-  candidate_asset="CLIProxyAPI_${plain_version}_${platform}.tar.gz"
-  checksum_line="$(grep "  ${candidate_asset}$" "${tmp_dir}/checksums.txt" || true)"
-  if [[ -n "${checksum_line}" ]]; then
-    asset="${candidate_asset}"
-    break
-  fi
-done
-if [[ -z "${checksum_line}" ]]; then
-  echo "Checksum entry not found for CLIProxyAPI_${plain_version}_<${platform_candidates[*]}>.tar.gz" >&2
-  exit 1
-fi
-checksum="${checksum_line%% *}"
-
-log "Downloading release asset: ${asset}"
-download_with_progress "${tmp_dir}/${asset}" "${download_base}/${asset}"
-
-log "Verifying checksum..."
-printf '%s  %s\n' "${checksum}" "${tmp_dir}/${asset}" | shasum -a 256 -c >/dev/null
-log "Checksum verified"
-
-log "Installing upstream binary: ${real_binary}"
-tar -xzf "${tmp_dir}/${asset}" -C "${tmp_dir}" cli-proxy-api
-install -m 0755 "${tmp_dir}/cli-proxy-api" "${real_binary}"
-
-log "Writing Homebrew service wrapper: ${wrapper}"
-chmod u+w "${wrapper}" 2>/dev/null || true
-cat >"${wrapper}" <<EOF
-#!/bin/sh
-exec "${real_binary}" -config "${config_path}" "\$@"
-EOF
-chmod 0755 "${wrapper}"
-
-log "Removing old release binaries..."
-find "${bin_dir}" -maxdepth 1 -type f -name 'cliproxyapi-*' ! -name "cliproxyapi-${plain_version}" -delete
-find "${cellar_root}" -path '*/bin/cliproxyapi-*' -type f ! -path "${real_binary}" -delete
-
-if brew services info "${formula}" 2>/dev/null | grep -q 'Running: true'; then
-  log "Restarting Homebrew service: ${formula}"
-  brew services restart "${formula}"
+if existing_binary_matches_version "${real_binary}" "${plain_version}"; then
+  log "Reusing existing upstream binary: ${real_binary}"
 else
-  log "Service is not currently running. Start it with:"
-  log "  brew services start ${formula}"
+  if [[ -x "${real_binary}" ]]; then
+    log "Existing upstream binary failed validation: ${real_binary}"
+  fi
+  log "Downloading checksums..."
+  curl_with_retry -fsSL -o "${tmp_dir}/checksums.txt" "${download_base}/checksums.txt"
+  find_release_asset "${plain_version}" "${tmp_dir}/checksums.txt"
+
+  if [[ "${dry_run}" == true ]]; then
+    log "Dry run: no files or services were changed"
+    log "Would download release asset: ${asset}"
+    log "Would install upstream binary: ${real_binary}"
+    log "Would write Homebrew service wrapper: ${wrapper}"
+    log "Would remove old release binaries"
+    if [[ "${json}" == true ]]; then
+      print_result_json "dry-run" "${command}" "${tag}" "false" "false" "No files or services were changed"
+    fi
+    exit 0
+  fi
+
+  log "Downloading release asset: ${asset}"
+  download_with_progress "${tmp_dir}/${asset}" "${download_base}/${asset}"
+
+  log "Verifying checksum..."
+  printf '%s  %s\n' "${checksum}" "${tmp_dir}/${asset}" | shasum -a 256 -c >/dev/null
+  log "Checksum verified"
+
+  log "Installing upstream binary: ${real_binary}"
+  tar -xzf "${tmp_dir}/${asset}" -C "${tmp_dir}" cli-proxy-api
+  install_binary_atomically "${tmp_dir}/cli-proxy-api"
+  changed=true
 fi
+
+if [[ "${dry_run}" == true ]]; then
+  log "Dry run: no files or services were changed"
+  log "Would install upstream binary: ${real_binary}"
+  log "Would write Homebrew service wrapper: ${wrapper}"
+  log "Would remove old release binaries"
+  if [[ "${json}" == true ]]; then
+    print_result_json "dry-run" "${command}" "${tag}" "false" "false" "No files or services were changed"
+  fi
+  exit 0
+fi
+
+write_wrapper_atomically
+changed=true
+remove_old_release_binaries
+restart_service_if_running
 
 set +o pipefail
 version_line="$("${wrapper}" --version 2>&1 | sed -n '1p')"
 set -o pipefail
 log "Installed version:"
-printf '%s\n' "${version_line}"
+log "${version_line}"
+
+if [[ "${json}" == true ]]; then
+  print_result_json "ok" "${command}" "${tag}" "${changed}" "${service_restarted}" "${version_line}"
+fi

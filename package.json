@@ -13,7 +13,7 @@
   ],
   "scripts": {
     "check": "bash -n bin/cliproxyapi-brew-updater",
-    "test": "bash tests/latest-without-api.sh && bash tests/up-to-date-skip.sh && bash tests/aarch64-asset-name.sh"
+    "test": "bash tests/latest-without-api.sh && bash tests/up-to-date-skip.sh && bash tests/aarch64-asset-name.sh && bash tests/status-json.sh && bash tests/dry-run.sh && bash tests/repair.sh && bash tests/repair-corrupt-binary.sh && bash tests/update-corrupt-fast-path.sh && bash tests/repair-version-prefix-mismatch.sh && bash tests/atomic-install.sh"
   },
   "keywords": [
     "cliproxyapi",

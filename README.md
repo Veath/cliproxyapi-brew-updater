@@ -54,12 +54,33 @@ npx cliproxyapi-brew-updater 6.9.36
 npx cliproxyapi-brew-updater v6.9.36
 ```
 
+Inspect the current install without changing files:
+
+```bash
+npx cliproxyapi-brew-updater status
+npx cliproxyapi-brew-updater doctor --json
+```
+
+Repair a partial or broken install:
+
+```bash
+npx cliproxyapi-brew-updater repair
+npx cliproxyapi-brew-updater repair 6.9.36
+```
+
+Preview an update without changing files or services:
+
+```bash
+npx cliproxyapi-brew-updater --dry-run
+```
+
 The updater:
 
 - detects `darwin_arm64` or `darwin_amd64`
 - downloads the matching GitHub release asset
 - verifies the release checksum
-- installs the upstream binary into the active Homebrew keg
+- installs the upstream binary into the active Homebrew keg with an atomic
+  temporary-file replacement
 - writes a `cliproxyapi` wrapper that passes:
   `/opt/homebrew/etc/cliproxyapi.conf` or `${HOMEBREW_PREFIX}/etc/cliproxyapi.conf`
 - restarts `brew services` if `cliproxyapi` is already running
@@ -98,6 +119,27 @@ Yes. Pass a version such as `6.9.36` or `v6.9.36`:
 ```bash
 npx cliproxyapi-brew-updater 6.9.36
 ```
+
+### How do I check whether the updater needs to repair anything?
+
+Run `npx cliproxyapi-brew-updater status`. It reports the wrapper target,
+current upstream version, latest upstream version, service state, and the count
+of old updater-installed release binaries across local Homebrew kegs. Use
+`--json` when another script needs to consume the result.
+
+### What does repair do?
+
+`repair` reconciles the target version. It reuses the upstream binary when it is
+already present and reports the target version correctly, rewrites the Homebrew
+service wrapper, removes old release binaries, and restarts the service if it is
+currently running. If the existing binary fails validation, `repair` downloads
+and verifies a fresh release asset.
+
+### Can I preview changes before applying them?
+
+Yes. Add `--dry-run`. The updater may still resolve release metadata, but it
+does not install binaries, rewrite wrappers, remove old files, or restart
+services.
 
 ## License
 

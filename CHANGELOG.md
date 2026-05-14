@@ -4,7 +4,24 @@ All notable changes to `cliproxyapi-brew-updater` are documented in this file.
 
 ## Unreleased
 
-- No changes yet.
+- Added `status` and `doctor` commands for inspecting the Homebrew wrapper,
+  installed upstream version, latest upstream version, service state, and old
+  release binaries.
+- Added `repair` to reconcile partial installs by reusing an existing upstream
+  binary when possible, rewriting the wrapper, cleaning old release binaries,
+  and restarting the service when needed.
+- Validate an existing target binary before reusing it during update or repair,
+  and fall back to a verified download when validation fails.
+- Require existing target binaries to pass validation before the default update
+  path reports that a version is already current.
+- Match reused binary versions with numeric boundaries so shorter target
+  versions cannot match longer installed versions.
+- Added `--dry-run` previews for update and repair flows.
+- Added `--json` output for status and automation-friendly update results.
+- Count old updater-installed release binaries across all local Homebrew
+  `cliproxyapi` kegs in `status` and `doctor`.
+- Made binary and wrapper replacement atomic through temporary files followed
+  by replacement.
 
 ## 0.1.7 - 2026-05-02
 
