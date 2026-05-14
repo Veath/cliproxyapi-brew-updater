@@ -4,6 +4,8 @@ All notable changes to `cliproxyapi-brew-updater` are documented in this file.
 
 ## Unreleased
 
+## 0.1.8 - 2026-05-14
+
 - Added `status` and `doctor` commands for inspecting the Homebrew wrapper,
   installed upstream version, latest upstream version, service state, and old
   release binaries.
