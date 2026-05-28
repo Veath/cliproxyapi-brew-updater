@@ -243,9 +243,7 @@ existing_binary_matches_version() {
   local version_output first_line expected_regex
 
   [[ -x "${candidate_binary}" ]] || return 1
-  if ! version_output="$("${candidate_binary}" --version 2>&1)"; then
-    return 1
-  fi
+  version_output="$("${candidate_binary}" --version 2>&1)" || true
   first_line="${version_output%%$'\n'*}"
   expected_regex="${expected_version//./\\.}"
   [[ "${first_line}" =~ (^|[^0-9.])${expected_regex}([^0-9.]|$) ]]

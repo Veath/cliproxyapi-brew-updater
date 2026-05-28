@@ -22,6 +22,10 @@ wrapper="${bin_dir}/cliproxyapi"
 cat >"${real_binary}" <<EOF
 #!/bin/sh
 printf 'cli-proxy-api ${version}\n'
+if [ "\${1:-}" = "--version" ]; then
+  echo 'flag provided but not defined: -version' >&2
+  exit 2
+fi
 EOF
 chmod 0755 "${real_binary}"
 cat >"${wrapper}" <<EOF
